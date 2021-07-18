@@ -51,14 +51,49 @@ class model
 			net.forward(outs, outNames);
 
 			postprocess(frame, outs, net, m_param.backend);
-			//if(boxes.size()>1)
-				//choosing side.... // !!!!!!!!!!! TAMAMLA !!!!!!
+			
+			if (boxes.size() > 1)
+			{
+				for (size_t i = 0; i < this->boxes.size(); i++)
+				{
+					Rect box = this->boxes.at(i);
+					int classId = this->classIds.at(i);
+					float conf = this->confidences.at(i);
 
-			bbox = this->boxes.back();
-			this->boxes.clear();
-			confidence = this->confidences.back();
-			this->confidences.clear();
+					rectangle(frame, box, Scalar(255, 255, 255));
+					std::string label = format("%.2f", conf);
+					if (!this->classes.empty())
+					{
+						CV_Assert(classId < (int)classes.size());
+						label = classes[classId]+ "-" + std::to_string(classId) + ": " + label;
+					}
 
+					int baseLine;
+					Size labelSize = getTextSize(label, FONT_HERSHEY_SIMPLEX, 0.5, 1, &baseLine);
+					box.y = max(box.y, labelSize.height);
+
+					rectangle(frame, Point(box.x, box.y - labelSize.height),
+						Point(box.x + labelSize.width, box.y + baseLine), Scalar::all(255), FILLED);
+					putText(frame, label, Point(box.x, box.y), FONT_HERSHEY_SIMPLEX, 0.5, Scalar());
+				}
+
+				putText(frame, "hedeflerden bir tanesini seçin", Point(100, 80), FONT_HERSHEY_SIMPLEX, 0.75, Scalar(0, 0, 255), 2);
+				imshow("detections", frame);
+
+				int keyboard = -1;
+				while (keyboard < 0)
+					keyboard = waitKey(5);
+				keyboard = (int)(keyboard - 48);
+				bbox = this->boxes.at(keyboard);
+				confidence = this->confidences.at(keyboard);
+			}
+			else
+			{
+				bbox = this->boxes.back();
+				this->boxes.clear();
+				confidence = this->confidences.back();
+				this->confidences.clear();
+			}
 			return confidence;
 		}
 		
@@ -82,7 +117,7 @@ void model::get_classes(std::string file)
 	std::string line;
 	while (std::getline(ifs, line))
 	{
-		classes.push_back(line);
+		this->classes.push_back(line);
 	}
 }
 
