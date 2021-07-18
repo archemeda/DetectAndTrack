@@ -54,10 +54,10 @@ class model
 			//if(boxes.size()>1)
 				//choosing side.... // !!!!!!!!!!! TAMAMLA !!!!!!
 
-			bbox = this->boxes.back;
-			this->boxes.clear;
-			confidence = this->confidences.back;
-			this->confidences.clear;
+			bbox = this->boxes.back();
+			this->boxes.clear();
+			confidence = this->confidences.back();
+			this->confidences.clear();
 
 			return confidence;
 		}
