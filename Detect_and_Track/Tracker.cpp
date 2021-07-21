@@ -110,6 +110,7 @@ int main(int argc, char** argv)
 
 	Rect2d bbox;//selectROI(frame); // ROI select
 	float confidence = yolov4.getObject<Rect2d>(frame, bbox);
+	CV_Assert(confidence>0);
 	Rect2d exp_bbox = bbox; // expected box -- mossenin verdiði yeni konumda boyutlandýrýlacak box 
 	cout << "model has done..." << endl;
 	cvtColor(frame, grayFrame, COLOR_BGR2GRAY); // mosse takes single channel img

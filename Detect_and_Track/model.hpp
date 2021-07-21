@@ -52,7 +52,7 @@ class model
 
 			postprocess(frame, outs, net, m_param.backend);
 			
-			if (boxes.size() > 1)
+			if (this->boxes.size() > 1)
 			{
 				for (size_t i = 0; i < this->boxes.size(); i++)
 				{
@@ -77,7 +77,7 @@ class model
 					putText(frame, label, Point(box.x, box.y), FONT_HERSHEY_SIMPLEX, 0.5, Scalar());
 				}
 
-				putText(frame, "hedeflerden bir tanesini secin", Point(100, 80), FONT_HERSHEY_SIMPLEX, 0.75, Scalar(0, 0, 255), 2);
+				putText(frame, "hedeflerden bir tanesini secin", Point(100, 80), FONT_HERSHEY_SIMPLEX, 0.75, Scalar(0, 255, 10), 2);
 				imshow("detections", frame);
 
 				int keyboard = -1;
@@ -87,12 +87,18 @@ class model
 				bbox = this->boxes.at(keyboard);
 				confidence = this->confidences.at(keyboard);
 			}
-			else
+			else if(this->boxes.size()==1)
 			{
 				bbox = this->boxes.back();
 				this->boxes.clear();
 				confidence = this->confidences.back();
 				this->confidences.clear();
+			}
+			else
+			{
+				putText(frame, "hedef bulunamadi", Point(100, 80), FONT_HERSHEY_SIMPLEX, 0.75, Scalar(0, 0, 255), 2);
+				imshow("detections", frame);
+				return false;
 			}
 			return confidence;
 		}
