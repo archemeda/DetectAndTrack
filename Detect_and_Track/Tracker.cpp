@@ -20,7 +20,7 @@ using namespace std;
 int mode = 1; // player modes --> play - 1 : stop - 0   || tuþlar:  esc --> çýk , p --> pause , r--> return  
 
 const char* winname = "Takip ekrani"; 
-const int win_size_h = 640, win_size_w = 640; // fixed win sizes
+const int win_size_h = 608, win_size_w = 608; // fixed win sizes
 
 
 std::string keys =
@@ -54,10 +54,12 @@ std::string keys =
 int main(int argc, char** argv)
 {
 	CommandLineParser parser(argc, argv, keys);
-	string filename = parser.get<String>("input");
+
 	const std::string modelName = parser.get<String>("@alias");
 	const std::string zooFile = parser.get<String>("zoo");
 	keys += genPreprocArguments(modelName, zooFile);
+
+	parser = CommandLineParser(argc, argv, keys);
 
 	CV_Assert(parser.has("model"));
 	std::string modelPath = findFile(parser.get<String>("model"));
@@ -71,11 +73,14 @@ int main(int argc, char** argv)
 	yolov4.scale = parser.get<float>("scale");
 	yolov4.swapRB = parser.get<float>("rgb");
 	yolov4.mean = parser.get<float>("mean");
-	yolov4.inpHeigth = parser.get<int>("heigth");
+	yolov4.inpHeigth = parser.get<int>("height");
 	yolov4.inpWidth = parser.get<int>("width");
 	if (parser.has("classes"))
 		yolov4.get_classes(parser.get<string>("classes"));
-
+	
+	string filename;
+	if(parser.has("input"))
+		filename = parser.get<String>("input");
 	Ptr<Tracker>tracker = TrackerMOSSE::create();//Tracker declaration
 
 	VideoCapture video;
@@ -84,6 +89,7 @@ int main(int argc, char** argv)
 		video.open(filename);
 		video.set(CAP_PROP_FRAME_WIDTH, win_size_w); // resize the screen
 		video.set(CAP_PROP_FRAME_HEIGHT, win_size_h);
+		cout << "file founded!!!" << endl;
 	}
 	else
 		video.open(0);
@@ -103,8 +109,9 @@ int main(int argc, char** argv)
 
 
 	Rect2d bbox;//selectROI(frame); // ROI select
-	float confidence = yolov4.getObject(frame, (Rect&)bbox);
+	float confidence = yolov4.getObject<Rect2d>(frame, bbox);
 	Rect2d exp_bbox = bbox; // expected box -- mossenin verdiði yeni konumda boyutlandýrýlacak box 
+	cout << "model has done..." << endl;
 	cvtColor(frame, grayFrame, COLOR_BGR2GRAY); // mosse takes single channel img
 	grayROI = grayFrame(bbox); // ROI the gray !!!
 
@@ -178,7 +185,7 @@ int main(int argc, char** argv)
 			}
 			else
 			{
-				confidence = yolov4.getObject(frame, (Rect&)bbox);
+				confidence = yolov4.getObject<Rect2d>(frame, bbox);
 				rectangle(frame, bbox, Scalar(255, 0, 0), 2, 1);
 				drawMarker(frame, Center(bbox), Scalar(0, 255, 0)); //mark the center 
 				track_or_detect = true;

@@ -41,8 +41,8 @@ class model
 			net.setPreferableTarget(m_param.target); // target frame platform
 			outNames = net.getUnconnectedOutLayersNames(); // get output names
 		}
-
-		float getObject(Mat frame, Rect& bbox)
+		template <typename T>
+		float getObject(Mat frame, T& bbox)
 		{
 			float confidence;
 			preprocess(frame, net, Size(inpWidth, inpHeigth), scale, this->mean, this->swapRB);
@@ -65,7 +65,7 @@ class model
 					if (!this->classes.empty())
 					{
 						CV_Assert(classId < (int)classes.size());
-						label = classes[classId]+ "-" + std::to_string(classId) + ": " + label;
+						label = std::to_string(i) + ": " + classes[classId] + "-" + label;
 					}
 
 					int baseLine;
@@ -77,7 +77,7 @@ class model
 					putText(frame, label, Point(box.x, box.y), FONT_HERSHEY_SIMPLEX, 0.5, Scalar());
 				}
 
-				putText(frame, "hedeflerden bir tanesini seçin", Point(100, 80), FONT_HERSHEY_SIMPLEX, 0.75, Scalar(0, 0, 255), 2);
+				putText(frame, "hedeflerden bir tanesini secin", Point(100, 80), FONT_HERSHEY_SIMPLEX, 0.75, Scalar(0, 0, 255), 2);
 				imshow("detections", frame);
 
 				int keyboard = -1;
@@ -132,6 +132,7 @@ inline void model::preprocess(const Mat& frame, Net& net, Size inpSize, float sc
 
 	// Run a model.
 	net.setInput(blob, "", scale, mean);
+	cout << "get layer" << net.getLayer(0)->outputNameToIndex("im_info") << endl;
 	if (net.getLayer(0)->outputNameToIndex("im_info") != -1)  // Faster-RCNN or R-FCN
 	{
 		resize(frame, frame, inpSize);
@@ -145,6 +146,7 @@ void model::postprocess(Mat& frame, const std::vector<Mat>& outs, Net& net, int 
 	static std::vector<int> outLayers = net.getUnconnectedOutLayers();
 	static std::string outLayerType = net.getLayer(outLayers[0])->type;
 
+	//std::cout << "out layer type=" << outLayerType <<"backend:"<< backend << std::endl;
 	if (outLayerType == "DetectionOutput")
 	{
 		// Network produces output blob with a shape 1x1xNx7 where N is a number of
