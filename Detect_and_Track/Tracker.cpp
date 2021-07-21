@@ -15,6 +15,57 @@ using namespace std;
 #include "model.hpp"
 #include "track_utils.hpp"
 
+//PID Struct and functions
+typedef struct {
+
+	/* Controller gains */
+	float Kp;
+	float Ki;
+	float Kd;
+
+	/* Derivative low-pass filter time constant */
+	float tau;
+
+	/* Output limits */
+	float limMin;
+	float limMax;
+
+	/* Integrator limits */
+	float limMinInt;
+	float limMaxInt;
+
+	/* Sample time (in seconds) */
+	float T;
+
+	/* Controller "memory" */
+	float integrator;
+	float prevError;			/* Required for integrator */
+	float differentiator;
+	float prevMeasurement;		/* Required for differentiator */
+
+	/* Controller output */
+	float out;
+
+} PID;
+
+#define PID_KP  2.0f
+#define PID_KI  0.5f
+#define PID_KD  0.25f
+
+#define PID_TAU 0.02f
+
+#define PID_LIM_MIN   -1000.0f
+#define PID_LIM_MAX   1000.0f
+
+#define PID_LIM_MIN_T   0.0f
+#define PID_LIM_MAX_T   1000.0f
+
+#define PID_LIM_MIN_INT -5.0f
+#define PID_LIM_MAX_INT  5.0f
+
+#define SAMPLE_TIME_S 0.01f
+
+
 #define frame_ratio 15 // iç boxun ROI ye oraný
 #define val 4
 int mode = 1; // player modes --> play - 1 : stop - 0   || tuþlar:  esc --> çýk , p --> pause , r--> return  
@@ -22,6 +73,9 @@ int mode = 1; // player modes --> play - 1 : stop - 0   || tuþlar:  esc --> çýk 
 const char* winname = "Takip ekrani"; 
 const int win_size_h = 608, win_size_w = 608; // fixed win sizes
 
+//PID fonksiyon prototipleri
+float PID_update(PID* pid, float setpoint, float measurement);
+void PID_init(PID* pid);
 
 std::string keys =
 "{ help  h     | | Print help message. }"
@@ -53,6 +107,12 @@ std::string keys =
 
 int main(int argc, char** argv)
 {
+
+	//PID Struct creation and initialisation for manouver calculation 
+	PID manouver_control = { PID_KP, PID_KI, PID_KD, PID_TAU,PID_LIM_MIN, PID_LIM_MAX,PID_LIM_MIN_INT, PID_LIM_MAX_INT,SAMPLE_TIME_S }; 
+	PID_init(&steer_control);
+
+
 	CommandLineParser parser(argc, argv, keys);
 
 	const std::string modelName = parser.get<String>("@alias");
@@ -207,3 +267,76 @@ int main(int argc, char** argv)
 	}
 	return 0;
 }
+
+//PID Update function 
+float PID_update(PID* pid, float setpoint, float measurement) {
+
+	float error = setpoint - measurement;
+
+	/*
+	* Proportional
+	*/
+	float proportional = pid->Kp * error;
+
+	/*
+	* Integral
+	*/
+	pid->integrator = pid->integrator + 0.5f * pid->Ki * pid->T * (error + pid->prevError);
+
+	/* Anti-wind-up via integrator clamping */
+	if (pid->integrator > pid->limMaxInt) {
+
+		pid->integrator = pid->limMaxInt;
+
+	}
+	else if (pid->integrator < pid->limMinInt) {
+
+		pid->integrator = pid->limMinInt;
+
+	}
+
+	/*
+	* Derivative (band-limited differentiator)
+	*/
+
+	pid->differentiator = -(2.0f * pid->Kd * (measurement - pid->prevMeasurement)	/* Note: derivative on measurement, therefore minus sign in front of equation! */
+		+ (2.0f * pid->tau - pid->T) * pid->differentiator)
+		/ (2.0f * pid->tau + pid->T);
+
+	/*
+	* Compute output and apply limits
+	*/
+	pid->out = proportional + pid->integrator + pid->differentiator;
+
+	if (pid->out > pid->limMax) {
+
+		pid->out = pid->limMax;
+
+	}
+	else if (pid->out < pid->limMin) {
+
+		pid->out = pid->limMin;
+
+	}
+
+	/* Store error and measurement for later use */
+	pid->prevError = error;
+	pid->prevMeasurement = measurement;
+
+	/* Return controller output */
+	return pid->out;
+
+}
+
+void PID_init(PID* pid) {
+
+	pid->integrator = 0.0f;
+	pid->prevError = 0.0f;
+
+	pid->differentiator = 0.0f;
+	pid->prevMeasurement = 0.0f;
+
+	pid->out = 0.0f;
+
+}
+
