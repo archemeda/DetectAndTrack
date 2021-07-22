@@ -9,8 +9,23 @@
 #include <opencv2/core/ocl.hpp>
 #include <opencv2/gapi/core.hpp> // GPU API library
 
+#include <cstdint>
+#include <mavsdk/mavsdk.h>
+#include <mavsdk/plugins/action/action.h>
+#include <mavsdk/plugins/telemetry/telemetry.h>
+#include <mavsdk/plugins/offboard/offboard.h>
+#include <future>
+#include <memory>
+#include <thread>
+#include <chrono>
+#include <cmath>
+
 using namespace cv;
 using namespace std; 
+using namespace mavsdk;
+using std::chrono::milliseconds;
+using std::chrono::seconds;
+using std::this_thread::sleep_for;
 
 #include "model.hpp"
 #include "track_utils.hpp"
@@ -47,6 +62,87 @@ typedef struct {
 	float out;
 
 } PID;
+
+void wait_until_discover(Mavsdk& mavsdk)
+{
+	std::cout << "Waiting to discover system..." << std::endl;
+	std::promise<void> discover_promise;
+	auto discover_future = discover_promise.get_future();
+
+	mavsdk.subscribe_on_new_system([&mavsdk, &discover_promise]() {
+		const auto system = mavsdk.systems().at(0);
+
+		if (system->is_connected()) {
+			std::cout << "Discovered system" << std::endl;
+			discover_promise.set_value();
+		}
+		});
+
+	discover_future.wait();
+}
+
+#define ERROR_CONSOLE_TEXT "\033[31m" // Turn text on console red
+#define TELEMETRY_CONSOLE_TEXT "\033[34m" // Turn text on console blue
+#define NORMAL_CONSOLE_TEXT "\033[0m" // Restore normal console colour
+
+// Handles Action's result
+inline void action_error_exit(Action::Result result, const std::string& message)
+{
+	if (result != Action::Result::Success) {
+		std::cerr << ERROR_CONSOLE_TEXT << message << result << NORMAL_CONSOLE_TEXT << std::endl;
+		exit(EXIT_FAILURE);
+	}
+}
+
+// Handles Offboard's result
+inline void offboard_error_exit(Offboard::Result result, const std::string& message)
+{
+	if (result != Offboard::Result::Success) {
+		std::cerr << ERROR_CONSOLE_TEXT << message << result << NORMAL_CONSOLE_TEXT << std::endl;
+		exit(EXIT_FAILURE);
+	}
+}
+
+// Handles connection result
+inline void connection_error_exit(ConnectionResult result, const std::string& message)
+{
+	if (result != ConnectionResult::Success) {
+		std::cerr << ERROR_CONSOLE_TEXT << message << result << NORMAL_CONSOLE_TEXT << std::endl;
+		exit(EXIT_FAILURE);
+	}
+}
+
+// Logs during Offboard control
+inline void offboard_log(const std::string& offb_mode, const std::string msg)
+{
+	std::cout << "[" << offb_mode << "] " << msg << std::endl;
+}
+
+Telemetry::LandedStateCallback
+landed_state_callback(Telemetry& telemetry, std::promise<void>& landed_promise)
+{
+	return [&landed_promise, &telemetry](Telemetry::LandedState landed) {
+		switch (landed) {
+		case Telemetry::LandedState::OnGround:
+			std::cout << "On ground" << std::endl;
+			break;
+		case Telemetry::LandedState::TakingOff:
+			std::cout << "Taking off..." << std::endl;
+			break;
+		case Telemetry::LandedState::Landing:
+			std::cout << "Landing..." << std::endl;
+			break;
+		case Telemetry::LandedState::InAir:
+			std::cout << "Taking off has finished." << std::endl;
+			telemetry.subscribe_landed_state(nullptr);
+			landed_promise.set_value();
+			break;
+		case Telemetry::LandedState::Unknown:
+			std::cout << "Unknown landed state." << std::endl;
+			break;
+		}
+	};
+}
 
 #define PID_KP  2.0f
 #define PID_KI  0.5f
@@ -109,8 +205,58 @@ int main(int argc, char** argv)
 {
 
 	//PID Struct creation and initialisation for manouver calculation 
-	PID manouver_control = { PID_KP, PID_KI, PID_KD, PID_TAU,PID_LIM_MIN, PID_LIM_MAX,PID_LIM_MIN_INT, PID_LIM_MAX_INT,SAMPLE_TIME_S }; 
-	PID_init(&steer_control);
+
+	PID manouver_control_forward = { PID_KP, PID_KI, PID_KD, PID_TAU,PID_LIM_MIN, PID_LIM_MAX,PID_LIM_MIN_INT, PID_LIM_MAX_INT,SAMPLE_TIME_S }; 
+	PID_init(&manouver_control_forward);
+
+	PID manouver_control_right = { PID_KP, PID_KI, PID_KD, PID_TAU,PID_LIM_MIN, PID_LIM_MAX,PID_LIM_MIN_INT, PID_LIM_MAX_INT,SAMPLE_TIME_S };
+	PID_init(&manouver_control_right);
+
+	PID manouver_control_up = { PID_KP, PID_KI, PID_KD, PID_TAU,PID_LIM_MIN, PID_LIM_MAX,PID_LIM_MIN_INT, PID_LIM_MAX_INT,SAMPLE_TIME_S };
+	PID_init(&manouver_control_up);
+	//down is positive !!!!
+
+	//connecting px4 flight controller with offboard jetson nano
+
+	Mavsdk mavsdk;
+	std::string connection_url = " serial://Dev_Node[:Baudrate]"; //change this according to jetson nano's connection
+	ConnectionResult connection_result;
+
+	connection_result = mavsdk.add_any_connection(connection_url);
+
+	if (connection_result != ConnectionResult::Success) {
+
+		cout << "connection failed" << std::endl;
+		return 1;
+
+	}
+
+	wait_until_discover(mavsdk);//wait until system is discovered
+
+	auto system = mavsdk.systems().at(0);
+	auto action = Action{ system };
+	auto offboard = Offboard{ system };
+	auto telemetry = Telemetry{ system };
+
+	while (!telemetry.health_all_ok()) {
+		std::cout << "Waiting for system to be ready" << std::endl;
+		sleep_for(seconds(1));
+	}
+	std::cout << "System is ready" << std::endl;
+
+	std::promise<void> in_air_promise;
+	auto in_air_future = in_air_promise.get_future();
+
+	Action::Result arm_result = action.arm();
+	action_error_exit(arm_result, "Arming failed");
+	std::cout << "Armed" << std::endl;
+
+	Action::Result takeoff_result = action.takeoff();
+	action_error_exit(takeoff_result, "Takeoff failed");
+
+	telemetry.subscribe_landed_state(landed_state_callback(telemetry, in_air_promise));
+	in_air_future.wait();
+
 
 
 	CommandLineParser parser(argc, argv, keys);
@@ -235,6 +381,17 @@ int main(int argc, char** argv)
 					drawMarker(frame, Center(bbox), Scalar(0, 255, 0)); //mark the center 
 						// FPS'i yaz
 					putText(frame, "FPS : " + SSTR(int(fps)), Point(100, 50), FONT_HERSHEY_SIMPLEX, 0.75, Scalar(50, 170, 50), 2);
+
+					//if tracking is successfull calculate the manouvers
+
+					float right_cmd = PID_update(&manouver_control_right, Center(bbox).x, frame_center_x);
+					float forward_cmd = PID_update(&manouver_control_forward, Center(bbox).y, frame_center_y);
+					
+					//calculated commands are sent over serial connection using MAVSdk
+
+
+					
+
 				}
 				else
 				{
